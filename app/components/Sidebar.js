@@ -1,7 +1,15 @@
+import EditableTitle from "./EditableTitle";
+
 // components/Sidebar.jsx
-export default function Sidebar({ onNewChat }) {
+export default function Sidebar({
+    onNewChat,
+    chatSessions,
+    currentSessionId,
+    onSelectSession,
+    onUpdateTitle
+}) {
     return (
-        <div className="w-64 bg-gray-50 shadow-md h-screen flex flex-col">
+        <div className="w-64 bg-gray-50 h-screen flex flex-col">
             <div className="p-4">
                 <button
                     onClick={onNewChat}
@@ -24,6 +32,26 @@ export default function Sidebar({ onNewChat }) {
                     New Chat
                 </button>
             </div>
+
+            <div className="flex-1 gap-1 overflow-y-auto">
+                {chatSessions.map(session => (
+                    <div
+                        key={session.id}
+                        onClick={() => onSelectSession(session.id)}
+                        className={`p-3 cursor-pointer hover:bg-gray-200 ${currentSessionId === session.id ? 'bg-gray-200' : ''
+                            }`}
+                    >
+                        <EditableTitle
+                            title={session.title}
+                            isActive={currentSessionId === session.id}
+                            onUpdate={(newTitle) => onUpdateTitle(session.id, newTitle)}
+                        />
+                        <div className="text-gray-700 text-xs">
+                            {new Date(session.timestamp).toLocaleString()}
+                        </div>
+                    </div>
+                ))}
+            </div>
         </div>
     );
-}
+}                  
