@@ -13,86 +13,105 @@ export async function POST(req) {
     console.log('Received request:', { provider, model, messageCount: messages.length });
 
     switch (provider) {
-        case 'openai': {
-            try {
-              const openaiClient = new OpenAI({  // Note: OpenAI instead of openai
-                apiKey: process.env.OPENAI_API_KEY,
-              });
-          
-              const response = await openaiClient.chat.completions.create({
-                model: model || 'gpt-4',  // Note: 'gpt-4' instead of 'GPT-4o'
-                messages,
-                stream: true,
-              });
-          
-              const stream = new TransformStream();
-              const writer = stream.writable.getWriter();
-              const encoder = new TextEncoder();
-          
-              // Stream the response text
-              (async () => {
-                try {
-                  for await (const chunk of response) {
-                    const text = chunk.choices[0]?.delta?.content || '';
-                    await writer.write(encoder.encode(text));
-                  }
-                } catch (error) {
-                  console.error('OpenAI stream processing error:', error);
-                } finally {
-                  await writer.close();
-                }
-              })();
-          
-              return new Response(stream.readable);
-            } catch (error) {
-              console.error('OpenAI error:', error);
-              return NextResponse.json(
-                { error: `OpenAI error: ${error.message}` },
-                { status: 500 }
-              );
-            }
-          }
+      case 'openai': {
+        try {
+          const openaiClient = new OpenAI({  // Note: OpenAI instead of openai
+            apiKey: process.env.OPENAI_API_KEY,
+          });
 
-          case 'anthropic': {
+          const response = await openaiClient.chat.completions.create({
+            model: model || 'gpt-4',  // Note: 'gpt-4' instead of 'GPT-4o'
+            messages,
+            stream: true,
+          });
+
+          const stream = new TransformStream();
+          const writer = stream.writable.getWriter();
+          const encoder = new TextEncoder();
+
+          // Stream the response text
+          (async () => {
             try {
-              const { text } = await generateText({
-                model: anthropic(model || 'claude-3-haiku-20240307'),
-                prompt: messages.map(m => m.content).join(' '),
-              });
-          
-              // Format response like Gemini
-              return NextResponse.json({ 
-                response: text 
-              });
+              for await (const chunk of response) {
+                const text = chunk.choices[0]?.delta?.content || '';
+                await writer.write(encoder.encode(text));
+              }
             } catch (error) {
-              console.error('Anthropic error:', error);
-              return NextResponse.json(
-                { error: `Anthropic error: ${error.message}` },
-                { status: 500 }
-              );
+              console.error('OpenAI stream processing error:', error);
+            } finally {
+              await writer.close();
             }
-          }
+          })();
+
+          return new Response(stream.readable);
+        } catch (error) {
+          console.error('OpenAI error:', error);
+          return NextResponse.json(
+            { error: `OpenAI error: ${error.message}` },
+            { status: 500 }
+          );
+        }
+      }
+
+      case 'anthropic': {
+        try {
+          // Using your existing anthropic setup
+          const { text } = await generateText({
+            model: anthropic(model || 'claude-3-opus-20240229'),
+            prompt: messages.map(m => m.content).join('\n\n'),
+          });
+
+          // Format response like Gemini
+          return NextResponse.json({
+            response: text
+          });
+        } catch (error) {
+          console.error('Anthropic error:', error);
+          return NextResponse.json(
+            { error: `Anthropic error: ${error.message}` },
+            { status: 500 }
+          );
+        }
+      }
+
+
+
+
 
       case 'google': {
         try {
           const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
           const chat = genAI.getGenerativeModel({ model: model || 'gemini-pro' });
-          
-          // Format messages correctly for Gemini
+
           const formattedMessages = messages.map(m => ({
             role: m.role === 'assistant' ? 'model' : 'user',
             parts: [{ text: m.content }]
           }));
-      
-          // Generate content with the formatted messages
-          const result = await chat.generateContent({
-            contents: formattedMessages
+
+          const stream = new TransformStream();
+          const writer = stream.writable.getWriter();
+          const encoder = new TextEncoder();
+
+          // Generate content with streaming
+          const result = await chat.generateContentStream({  // Changed from generateContent to generateContentStream
+            contents: formattedMessages,
           });
-      
-          // Get the full response text
-          const fullText = result.response.text();
-      
-          return NextResponse.json({ response: fullText });
+
+          // Handle the streaming response
+          (async () => {
+            try {
+              for await (const chunk of result.stream) {
+                const text = chunk.text();  // Added () as it's a method
+                await writer.write(encoder.encode(text));
+              }
+            } catch (error) {
+              console.error('Gemini streaming error:', error);
+            } finally {
+              await writer.close();
+            }
+          })();
+
+          return new Response(stream.readable);
         } catch (error) {
           console.error('Google AI error:', error);
           return NextResponse.json(

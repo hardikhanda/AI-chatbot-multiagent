@@ -86,6 +86,29 @@ export default function Chat() {
 
     const handleStreamingResponse = async (response) => {
         try {
+            // Check if response is JSON
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                const data = await response.json();
+                const newMessage = {
+                    role: 'assistant',
+                    content: data.response || 'No response received'
+                };
+                setMessages(prev => [...prev, newMessage]);
+
+                // Update chat session
+                setChatSessions(prev => prev.map(session =>
+                    session.id === currentSessionId
+                        ? {
+                            ...session,
+                            messages: [...session.messages, newMessage]
+                        }
+                        : session
+                ));
+                return;
+            }
+
+            // Handle streaming response
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let accumulatedResponse = '';
@@ -140,22 +163,35 @@ export default function Chat() {
             const newMessages = [...messages, { role: 'user', content: userMessage }];
             setMessages(newMessages);
 
-            // Update current session
             // Generate title if this is the first message
             if (messages.length === 0) {
-                const title = await generateTitle(userMessage);
-                setChatSessions(prev => prev.map(session =>
-                    session.id === currentSessionId
-                        ? { ...session, title, messages: newMessages }
-                        : session
-                ));
-            } else {
-                setChatSessions(prev => prev.map(session =>
-                    session.id === currentSessionId
-                        ? { ...session, messages: newMessages }
-                        : session
-                ));
+                try {
+                    const title = await generateTitle(userMessage);
+                    console.log('Generated title:', title); // Add this for debugging
+                    setChatSessions(prev => prev.map(session =>
+                        session.id === currentSessionId
+                            ? {
+                                ...session,
+                                title: title || 'New Chat', // Ensure fallback
+                                messages: newMessages
+                            }
+                            : session
+                    ));
+                } catch (titleError) {
+                    console.error('Title generation error:', titleError);
+                    // Use default title if generation fails
+                    setChatSessions(prev => prev.map(session =>
+                        session.id === currentSessionId
+                            ? {
+                                ...session,
+                                title: 'New Chat',
+                                messages: newMessages
+                            }
+                            : session
+                    ));
+                }
             }
+
 
             const response = await fetch('/api/chat', {
                 method: 'POST',
@@ -174,19 +210,7 @@ export default function Chat() {
                 throw new Error('Failed to get response');
             }
 
-            // Handle response based on provider
-            switch (provider) {
-                case 'google':
-                    await handleGeminiResponse(response);
-                    break;
-                case 'anthropic':
-                    await handleAnthropicResponse(response);
-                    break;
-                default:
-                    await handleStreamingResponse(response);
-            }
-
-            // Don't update sessions here - it's handled in the response handlers
+            await handleStreamingResponse(response);
 
         } catch (error) {
             console.error('Chat error:', error);
@@ -199,6 +223,7 @@ export default function Chat() {
         }
     };
 
+
     const generateTitle = async (message) => {
         try {
             const response = await fetch('/api/chat', {
@@ -207,15 +232,36 @@ export default function Chat() {
                 body: JSON.stringify({
                     messages: [{
                         role: 'user',
-                        content: `Generate a very short title (max 4 words) for a conversation that starts with this message: "${message}" only give 4 words or less no other text like here is the response`
+                        content: `Generate a very short title (max 4 words) for a conversation that starts with this message: "${message} make it for 4 words or less and dont give anything like here is the response just the words"`
                     }],
                     provider: 'anthropic',
                     model: 'claude-3-sonnet-20240229',
                 }),
             });
 
-            const data = await response.json();
-            return data.response;
+            if (!response.ok) {
+                throw new Error('Failed to generate title');
+            }
+
+            // Check if response is JSON
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                const data = await response.json();
+                return data.response || 'New Chat';
+            }
+
+            // Handle streaming response
+            let title = '';
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                title += decoder.decode(value, { stream: true });
+            }
+
+            return title.trim() || 'New Chat';
         } catch (error) {
             console.error('Error generating title:', error);
             return 'New Chat';
